@@ -1,6 +1,22 @@
-Write your reflection here.
+# Assignment 04 Reflection: Timesheets to Payroll
 
-See reflection.md for what makes a good reflection — be specific, use the
-terminology from this assignment (lineage, grain, element function, Series.apply,
-row apply / axis=1, left merge, NaN, coerce, copy-add-return, boolean index,
-export), and make it actionable.
+### 1. What I Learned
+Through this assignment, I developed a deep conceptual and practical understanding of data lineage in ETL pipelines using pandas. Before this assignment, my intuition when cleaning data was to overwrite existing columns in-place or drop temporary fields to keep tables minimal. Building this pipeline showed me why that approach is disastrous in business contexts like payroll auditing: preserving raw source data right next to cleaned, numeric transformations allows every calculated figure to remain fully traceable and verifiable.
+
+I learned to work with datasets of differing grains. The employee roster has a grain of one row per person, whereas the weekly timesheet has a grain of one row per person who worked that week. Choosing a left merge on `employee_id` with the timesheet on the left was crucial: it ensured that every person who clocked hours was accounted for, while preventing individuals who took time off from being artificially introduced into weekly paychecks. It also made clear why an inner merge would have been a silent, catastrophic failure by quietly dropping employees who had missing or mistyped roster entries.
+
+I mastered the copy-add-return architecture (`out = df.copy()`), which guarantees that transformation functions operate with functional purity and never mutate caller DataFrames. I learned how to isolate element functions (`parse_hours`, `clean_currency`) to parse and coerce noisy user input into clean floats while catching unreadable strings without crashing (`ValueError`). I then bridged single-element parsing with DataFrame operations using `Series.apply` for 1D column mappings and `DataFrame.apply(..., axis=1)` (row apply) with lambdas to combine values across multiple columns (`hours_worked` and `hourly_rate_usd`) into `gross_pay` and `pay_type`. 
+
+Finally, I learned how to separate the internal lineage table from external downstream consumers: rather than renaming pipeline columns with `.rename()`, building a brand new DataFrame for the `export` provides the exact schema required by the payroll provider while keeping the audit trail intact. In the Streamlit app, utilizing boolean index filters (such as `payroll[payroll["pay_type"] == "unmatched"]`) and `.sum()` on Series allowed calculating dashboard metrics without relying on unnecessary grouping operations.
+
+### 2. Where I Struggled and What Confused Me
+The first challenge was in crafting `parse_hours` to handle the full variety of real-world text entries. I initially had to consider cases like `"45m"` (which represents 0.75 hours, requiring division by 60) versus compound strings like `"38h 30m"` and plain decimal strings like `"24.5"`. Ensuring that completely invalid strings like `"forty"` or non-matching tokens coerced gracefully to `0.0` rather than causing an unhandled exception took careful condition ordering and try-except handling.
+
+Another conceptual hurdle was handling `NaN` values resulting from unmatched rows in the left merge. Because `NaN == NaN` evaluates to `False`, checking for missing roster data required using `pd.isna(rate)`. In `classify_pay`, I had to make sure the `"unmatched"` condition was evaluated first, because an employee who logged overtime hours without a valid hourly rate must be flagged as unmatched rather than labeled as overtime.
+
+Additionally, working with `DataFrame.apply` required paying close attention to `axis=1`. Forgetting `axis=1` defaults to column-wise evaluation (`axis=0`), which produces cryptic KeyError and Series index errors when lambda expects row dictionaries.
+
+### 3. Actionable Next Steps for Improvement
+- **Vectorization vs. Row Apply**: While `DataFrame.apply(axis=1)` was ideal and intuitive for row-wise evaluation here, it effectively behaves as a Python-level loop over rows. To improve performance on datasets with millions of records, I will practice vectorized alternatives using NumPy (`np.where` or `np.select`) and pandas boolean masking to perform conditional column creation.
+- **Advanced Merge Diagnostics**: I will study pandas `merge` indicator flags (`indicator=True`) to automate lineage verification and identify unmatched records directly during pipeline joins across complex, multi-table schemas.
+- **Pytest Edge-Case Suite Development**: I will practice writing property-based test suites using `hypothesis` or expanded `@pytest.mark.parametrize` tables to stress-test text parsers against international currency symbols, regional decimal delimiters (e.g. comma as decimal point), and ISO time notations.
